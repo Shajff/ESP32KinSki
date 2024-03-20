@@ -219,7 +219,7 @@ int64_t server_client_clock_difference = 0;
 bool timer_resync_enable = false;
 bool timer_resync_allow = true;
 int64_t timer_period = 10000000; // in us PERIOD UZIMANJA UZORKA
-int64_t timer_resync_period = 22000; // in ms
+int64_t timer_resync_period = 12000; // in ms
 
 // [ENG] variables used for data logging in console
 // [HRV] varijable korištene za ispisivanje podataka u konzolu
@@ -1162,8 +1162,21 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         spp_gatts_if = gatts_if;
         is_connected = true;
         memcpy(&spp_remote_bda, &p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
+        //kao da sam t stisnuo kad se spoji klijent i time pocinje sync
+        server_message.s_time_send_message = esp_timer_get_time(); // sets the time of the sent message
+        initial_client_server_clock_difference = 0;
+        esp_ble_gatts_send_indicate(spp_gatts_if, spp_conn_id, spp_handle_table[SPP_IDX_SPP_DATA_NTY_VAL], 12, NULL, false); 
+        vTaskDelay((server_message.s_time_last_message_travel_time/(2*1000)) / portTICK_PERIOD_MS);
+        timer_start(true);
+        ESP_LOGE(TIMER_TAG,"\nSend t - Timer enabled");
         break;
     case ESP_GATTS_DISCONNECT_EVT:
+        //kao da sam u stisnio i time se brojac gasi i zavrsava sync
+        LED_control_task((void *)LED_PIN); 
+        esp_ble_gatts_send_indicate(spp_gatts_if, spp_conn_id, spp_handle_table[SPP_IDX_SPP_DATA_NTY_VAL], 12, NULL, false); 
+        timer_stop(true);
+        ESP_LOGE(TIMER_TAG,"\nSend u - Timer stopped");
+
         is_connected = false;
         enable_data_ntf = false;
         esp_ble_gap_start_advertising(&spp_adv_params);
