@@ -25,9 +25,16 @@
 #include "esp_bt_main.h"
 #include "ble_spp_server_demo.h"
 
+#include <stdio.h>
+#include "unity.h"
+#include "driver/i2c.h"
+#include "i2c_bus.h"
+#include "esp_system.h"
+
 // INPUT IMPORTS
 #include "driver/gpio.h"
 #include "button.h"
+#include "mpu6050.h"
 
 // TIMER IMPORTS
 #include "esp_timer.h"
@@ -40,7 +47,15 @@ static const char *TIMER_TAG = "TIMER";
 static const char *UZORAK_TAG = "UZORAK";
 
 #define GATTS_TABLE_TAG "BLE_SERVER"
+//I2C VARIJABLE
+#define I2C_MASTER_SCL_IO           22          /*!< gpio number for I2C master clock */
+#define I2C_MASTER_SDA_IO           21          /*!< gpio number for I2C master data  */
+#define I2C_MASTER_NUM              I2C_NUM_1   /*!< I2C port number for master dev */
+#define I2C_MASTER_FREQ_HZ          100000      /*!< I2C master clock frequency */
 
+static i2c_bus_handle_t i2c_bus = NULL;
+static mpu6050_handle_t mpu6050 = NULL;
+//
 void uart_task(void *pvParameters);
 void LED_control_task(void *ledPin);
 void timer_resync_task(void *params);
@@ -93,6 +108,8 @@ static bool is_connected = false;
 static esp_bd_addr_t spp_remote_bda = {
     0x0,
 };
+
+static bool connectedToClient = false;
 
 static uint16_t spp_handle_table[SPP_IDX_NB];
 
@@ -259,6 +276,51 @@ void button_setup()
     gpio_isr_handler_add(INPUT_PIN, gpio_interrupt_handler, (void *)INPUT_PIN);
     */
     #endif
+}
+
+static void mpu6050_init()
+{
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+    };
+    i2c_bus = i2c_bus_create(I2C_MASTER_NUM, &conf);
+    mpu6050 = mpu6050_create(i2c_bus, MPU6050_I2C_ADDRESS);
+}
+
+static void mpu6050_deinit()
+{
+    mpu6050_delete(&mpu6050);
+    i2c_bus_delete(&i2c_bus);
+}
+
+static void mpu6050_get_data()
+{
+    if(connectedToClient){
+    uint8_t mpu6050_deviceid;
+    mpu6050_acce_value_t acce;
+    mpu6050_gyro_value_t gyro;
+    int cnt = 10;
+    mpu6050_get_deviceid(mpu6050, &mpu6050_deviceid);
+    printf("mpu6050 device ID is: 0x%02x\n", mpu6050_deviceid);
+    mpu6050_wake_up(mpu6050);
+    mpu6050_set_acce_fs(mpu6050, ACCE_FS_4G);
+    mpu6050_set_gyro_fs(mpu6050, GYRO_FS_500DPS);
+
+    while (cnt--) {
+        printf("\n************* MPU6050 MOTION SENSOR ************\n");
+        mpu6050_get_acce(mpu6050, &acce);
+        printf("acce_x:%.2f, acce_y:%.2f, acce_z:%.2f\n", acce.acce_x, acce.acce_y, acce.acce_z);
+        mpu6050_get_gyro(mpu6050, &gyro);
+        printf("gyro_x:%.2f, gyro_y:%.2f, gyro_z:%.2f\n", gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
+        printf("**************************************************\n");
+        vTaskDelay(1000 / portTICK_RATE_MS);
+    }
+    }
 }
 
 void keyboard_button_handles_setup(){
@@ -526,6 +588,8 @@ void LED_control_task(void *ledPin)
     ESP_LOGI(UZORAK_TAG, "------------UZMI UZORAK------------");
     //TODO uzmi uzorak i uzmi od klijenta uzorak
     // vTaskDelete(NULL);
+    mpu6050_get_data();
+
 }
 
 // [ENG] after the response from the client has been received, the timers are checked and reset
@@ -1162,6 +1226,9 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         spp_gatts_if = gatts_if;
         is_connected = true;
         memcpy(&spp_remote_bda, &p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
+        //ukljuci i2c konekciju za senzor
+        mpu6050_init();
+        connectedToClient = true;
         //kao da sam t stisnuo kad se spoji klijent i time pocinje sync
         server_message.s_time_send_message = esp_timer_get_time(); // sets the time of the sent message
         initial_client_server_clock_difference = 0;
@@ -1171,6 +1238,9 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         ESP_LOGE(TIMER_TAG,"\nSend t - Timer enabled");
         break;
     case ESP_GATTS_DISCONNECT_EVT:
+        //iskljuci i2c konekciju za senzor
+        connectedToClient = false;
+        mpu6050_deinit();
         //kao da sam u stisnio i time se brojac gasi i zavrsava sync
         LED_control_task((void *)LED_PIN); 
         esp_ble_gatts_send_indicate(spp_gatts_if, spp_conn_id, spp_handle_table[SPP_IDX_SPP_DATA_NTY_VAL], 12, NULL, false); 
