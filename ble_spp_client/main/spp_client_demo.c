@@ -54,6 +54,8 @@
 static const char *LED_TAG = "LED";
 static const char *TIMER_TAG = "TIMER";
 static const char *UZORAK_TAG = "UZORAK";
+char arraySensorValue[10];
+double sensorValue;
 
 void LED_control_task(void *ledPin);
 void timer_callback(void *param);
@@ -129,7 +131,6 @@ void led_setup() {
     esp_rom_gpio_pad_select_gpio(LED_PIN);
     gpio_set_direction(LED_PIN, GPIO_MODE_INPUT_OUTPUT); // has to be INPUT_OUTPUT to be able to read it
     gpio_set_level(LED_PIN, 0);
-    //ESP_LOGI(LED_TAG, "Turn the LED on");
 }
 
 void client_message_setup() {
@@ -148,13 +149,6 @@ void timer_setup() {
         .name = "Timer client"};
     ESP_ERROR_CHECK(esp_timer_create(&my_timer_args, &timer_handler));
 }
-
-void keyboard_button_handles_setup(){
-    keyboard_buttons.uart_compare_o = (uint8_t *)malloc(sizeof(uint8_t) * 1);
-    memset(keyboard_buttons.uart_compare_o, 'o', 1);
-
-}
-
 
 static void mpu6050_init()
 {
@@ -192,6 +186,7 @@ static void mpu6050_get_data()
     mpu6050_get_gyro(mpu6050, &gyro);
     printf("gyro_x:%.2f, gyro_y:%.2f, gyro_z:%.2f\n", gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
     printf("**************************************************\n");
+    sensorValue = gyro.gyro_z; //TODO TU STAVIT KOJI PARAMETAR ODGOVARA NAGIBU
 }
 
 ///////////////////////////////////////////
@@ -337,6 +332,10 @@ char *timer_value_to_char_array(int64_t currentTime, bool addFunctionTime)
     temp22 = esp_timer_get_time();
     return temp_my;
 }
+void sensor_value_to_sensor_value_char_array(double sensorValue, char *buffer, int bufferSize)
+{
+    snprintf(buffer, bufferSize, "%.8f", sensorValue); // Adjust precision as needed
+}
 
 // [ENG] calculates response time from the client 
 // [HRV] računa vrijeme odgovora klijenta
@@ -355,6 +354,9 @@ char *timer_and_response_message_reply() {
     strcat(temp_my, timer_value_to_char_array(server_message.s_time_send_reply, false)); // get current time - for now add nothing
     strcat(temp_my, "|");
     strcat(temp_my, timer_value_to_char_array(last_client_LED_local_time,false));
+    strcat(temp_my, "|");
+    sensor_value_to_sensor_value_char_array(sensorValue,arraySensorValue,10);
+    strcat(temp_my, arraySensorValue);
     temp_value = esp_timer_get_time();
     return temp_my;
 }
@@ -375,65 +377,8 @@ void LED_control_task(void *ledPin){ // parameters can be empty
     last_client_LED_local_time = esp_timer_get_time();
     ESP_LOGI(UZORAK_TAG, "------------UZMI UZORAK------------");
     mpu6050_get_data();
-    //vTaskDelete(NULL);
 }
 
-
-// [ENG] function of receiving the keyboard input data and doing different actions based on different inputs
-// [HRV] funkcija zadatka primanja i prepoznavanja pristisnutih tipki s tipkovnice te odrađivanja različitih akcija na temelju istih
-void uart_task(void *pvParameters)
-{
-    uart_event_t event;
-    for (;;) {
-        //Waiting for UART event.
-        if (xQueueReceive(spp_uart_queue, (void * )&event, (TickType_t)portMAX_DELAY)) {
-            client_message.c_time_send_signal = esp_timer_get_time(); // UART singal received
-            switch (event.type) {
-            //Event of UART receving data
-            case UART_DATA:
-                if (event.size && (is_connect == true) && (db != NULL) && ((db+SPP_IDX_SPP_DATA_RECV_VAL)->properties & (ESP_GATT_CHAR_PROP_BIT_WRITE_NR | ESP_GATT_CHAR_PROP_BIT_WRITE))) {
-                    uint8_t * temp = NULL;
-                    temp = (uint8_t *)malloc(sizeof(uint8_t)*event.size);
-                    if(temp == NULL){
-                        ESP_LOGE(GATTC_TAG, "malloc failed,%s L#%d\n", __func__, __LINE__);
-                        break;
-                    }
-                    
-                    memset(temp, 0x0, event.size);
-                    uart_read_bytes(UART_NUM_0,temp,event.size,portMAX_DELAY);
-
-                    if (memcmp(temp, keyboard_buttons.uart_compare_o, 1) == 0) { // paljenje/gašenje LOGGING funkcija za vrijeme odgovora poruke - ubrzava odgovor
-                        console_logging = !console_logging;
-                    }
-
-                    else {
-                        LED_control_task((void*) LED_PIN);
-                        client_initiated_message = true; // info that the message came from the client
-                        int64_t currentTime = esp_timer_get_time(); // get this time and use it - izmjeri koliko je izmedu tog i ovog write charr
-                        char *temp_my = timer_value_to_char_array(currentTime, false);
-                        client_message.c_time_send_message = esp_timer_get_time();
-                        esp_ble_gattc_write_char( spp_gattc_if,
-                                              spp_conn_id,
-                                              (db+SPP_IDX_SPP_DATA_RECV_VAL)->attribute_handle,
-                                              12*sizeof(char), // size of char array temp my
-                                              (uint8_t*) temp_my,
-                                              //ESP_GATT_WRITE_TYPE_NO_RSP, // this should shorten the time
-                                              ESP_GATT_WRITE_TYPE_RSP,
-                                              ESP_GATT_AUTH_REQ_NONE);
-
-                    free(temp_my);
-                    }
-                    free(temp);
-
-                }
-                break;
-            default:
-                break;
-            }
-        }
-    }
-    vTaskDelete(NULL);
-}
 
 ///////////////////////////////////////////
 ///////////////////////////////////////////
@@ -539,7 +484,7 @@ static void notify_event_handler(esp_ble_gattc_cb_param_t * p_data)
             esp_ble_gattc_write_char( spp_gattc_if,
                                               spp_conn_id,
                                               (db+SPP_IDX_SPP_DATA_RECV_VAL)->attribute_handle,
-                                              37, // length of this reply
+                                              49, // length of this reply
                                               (uint8_t*) timer_and_response_message_reply(),
                                               //client_basic_message.client_message_length,
                                               //(uint8_t*) client_basic_message.client_message,
@@ -623,12 +568,8 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         esp_ble_gap_cb_param_t *scan_result = (esp_ble_gap_cb_param_t *)param;
         switch (scan_result->scan_rst.search_evt) {
         case ESP_GAP_SEARCH_INQ_RES_EVT:
-            esp_log_buffer_hex(GATTC_TAG, scan_result->scan_rst.bda, 6);
-            //ESP_LOGI(GATTC_TAG, "Searched Adv Data Len %d, Scan Response Len %d", scan_result->scan_rst.adv_data_len, scan_result->scan_rst.scan_rsp_len);
             adv_name = esp_ble_resolve_adv_data(scan_result->scan_rst.ble_adv, ESP_BLE_AD_TYPE_NAME_CMPL, &adv_name_len);
-            //ESP_LOGI(GATTC_TAG, "Searched Device Name Len %d", adv_name_len);
             esp_log_buffer_char(GATTC_TAG, adv_name, adv_name_len);
-            //ESP_LOGI(GATTC_TAG, "\n");
             if (adv_name != NULL) {
                 if ( strncmp((char *)adv_name, device_name, adv_name_len) == 0) {
                     memcpy(&(scan_rst), scan_result, sizeof(esp_ble_gap_cb_param_t));
@@ -902,33 +843,10 @@ void ble_client_appRegister(void)
 }
 
 
-static void spp_uart_init(void)
-{
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_RTS,
-        .rx_flow_ctrl_thresh = 122,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-
-    //Install UART driver, and get the queue.
-    uart_driver_install(UART_NUM_0, 4096, 8192, 10, &spp_uart_queue, 0);
-    //Set UART parameters
-    uart_param_config(UART_NUM_0, &uart_config);
-    //Set UART pins
-    uart_set_pin(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    xTaskCreate(uart_task, "uTask", 4096, (void*)UART_NUM_0, 8, NULL);
-    //xTaskCreate(LED_Control_Task, "ledTask", 2048, (void*)LED_PIN, 1, NULL);
-}
-
 void peripheral_setup(){
     led_setup();
     timer_setup();
     client_message_setup();
-    keyboard_button_handles_setup();
 }
 
 void app_main(void)
@@ -965,8 +883,6 @@ void app_main(void)
     }
 
     ble_client_appRegister();
-    //ESP_LOGE
-    spp_uart_init();
     peripheral_setup();
 
 }

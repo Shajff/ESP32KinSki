@@ -55,6 +55,7 @@ static const char *UZORAK_TAG = "UZORAK";
 
 static i2c_bus_handle_t i2c_bus = NULL;
 static mpu6050_handle_t mpu6050 = NULL;
+static double sensorValueClient;
 //
 void uart_task(void *pvParameters);
 void LED_control_task(void *ledPin);
@@ -424,6 +425,13 @@ char *response_extract_last_client_timer_local_time(char* response) {
     return strtok(response, "|");
 }
 
+char *response_extract_sensor_value(char* response) {
+    strtok_r(response, "|", &response);
+    strtok_r(response, "|", &response);
+    strtok_r(response, "|", &response);
+    return strtok(response, "|");
+}
+
 // [ENG] calculates the time difference between the server local clock and the client's local clock
 // [HRV] računa razliku u lokalnim vremenima brojača između servera i klijenta
 int64_t calculate_server_client_clock_difference(int64_t clientClock, int64_t clientDuration){
@@ -505,6 +513,14 @@ char *timer_value_to_char_array(int64_t currentTime, bool addFunctionTime)
 int64_t char_array_to_timer_value(char *arrayValue)
 {
     return strtoll(arrayValue, NULL, 10);
+}
+
+double char_array_to_sensor_value(char *arrayValue) {
+    // Convert the input character array to a double
+    double value = atof(arrayValue);
+
+    // Return the converted value
+    return value;
 }
 
 // [ENG] callback function used for timer task
@@ -1143,6 +1159,8 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                     char *responseDuration = response_extract_duration((char *) p_data->write.value);
                     char *responseClock = response_extract_clock((char *) p_data->write.value);
                     char *responseLocalTimer = response_extract_last_client_timer_local_time((char *) p_data->write.value);
+                    char *responseSensorValue = response_extract_sensor_value((char *) p_data->write.value);
+                    sensorValueClient = char_array_to_sensor_value(responseSensorValue);
                     last_client_timer_local_time = char_array_to_timer_value(responseLocalTimer);
                     if (initial_client_server_clock_difference == 0 && last_server_timer_local_time != 0) {
                         initial_client_server_clock_difference = last_server_timer_local_time - last_client_timer_local_time;
@@ -1165,6 +1183,7 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                         static_delay_value = true;
                     } 
                     ESP_LOGE(TIMER_TAG, "Delay between two LEDs %d us\n", delay_value);
+                    ESP_LOGE(TIMER_TAG, "Sensor value from client: %.2f\n", sensorValueClient);
 
                 }
                 uart_write_bytes(UART_NUM_0, "\n", 1);
