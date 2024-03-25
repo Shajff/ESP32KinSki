@@ -38,6 +38,12 @@
 #include "driver/uart.h"
 #include "driver/gpio.h"
 
+#include <stdio.h>
+#include "unity.h"
+#include "driver/i2c.h"
+#include "i2c_bus.h"
+#include "esp_system.h"
+#include "mpu6050.h"
 
 // TIMER IMPORTS
 #include "esp_timer.h"
@@ -60,6 +66,11 @@ void timer_callback(void *param);
 #define ESP_GATT_SPP_SERVICE_UUID   0xABF0
 #define SCAN_ALL_THE_TIME           0
 
+//I2C VARIJABLE
+#define I2C_MASTER_SCL_IO           22          /*!< gpio number for I2C master clock */
+#define I2C_MASTER_SDA_IO           21          /*!< gpio number for I2C master data  */
+#define I2C_MASTER_NUM              I2C_NUM_1   /*!< I2C port number for master dev */
+#define I2C_MASTER_FREQ_HZ          100000      /*!< I2C master clock frequency */
 
 ///////////////////////////////////////////
 /////// STRUKTURE ZA SINKRONIZACIJU ///////
@@ -106,6 +117,9 @@ esp_timer_handle_t timer_handler;
 int64_t last_client_timer_local_time = 0;
 int64_t last_client_LED_local_time = 0;
 
+static i2c_bus_handle_t i2c_bus = NULL;
+static mpu6050_handle_t mpu6050 = NULL;
+
 ///////////////////////////////////////////
 ////////// FUNKCIJE POSTAVLJANJA //////////
 ///////////// SETUP FUNCTIONS /////////////
@@ -139,6 +153,45 @@ void keyboard_button_handles_setup(){
     keyboard_buttons.uart_compare_o = (uint8_t *)malloc(sizeof(uint8_t) * 1);
     memset(keyboard_buttons.uart_compare_o, 'o', 1);
 
+}
+
+
+static void mpu6050_init()
+{
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+    };
+    i2c_bus = i2c_bus_create(I2C_MASTER_NUM, &conf);
+    mpu6050 = mpu6050_create(i2c_bus, MPU6050_I2C_ADDRESS);
+}
+
+static void mpu6050_deinit()
+{
+    mpu6050_delete(&mpu6050);
+    i2c_bus_delete(&i2c_bus);
+}
+
+static void mpu6050_get_data()
+{
+    uint8_t mpu6050_deviceid;
+    mpu6050_acce_value_t acce;
+    mpu6050_gyro_value_t gyro;
+    mpu6050_get_deviceid(mpu6050, &mpu6050_deviceid);
+    printf("mpu6050 device ID is: 0x%02x\n", mpu6050_deviceid);
+    mpu6050_wake_up(mpu6050);
+    mpu6050_set_acce_fs(mpu6050, ACCE_FS_4G);
+    mpu6050_set_gyro_fs(mpu6050, GYRO_FS_500DPS);
+    printf("\n************* MPU6050 MOTION SENSOR ************\n");
+    mpu6050_get_acce(mpu6050, &acce);
+    printf("acce_x:%.2f, acce_y:%.2f, acce_z:%.2f\n", acce.acce_x, acce.acce_y, acce.acce_z);
+    mpu6050_get_gyro(mpu6050, &gyro);
+    printf("gyro_x:%.2f, gyro_y:%.2f, gyro_z:%.2f\n", gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
+    printf("**************************************************\n");
 }
 
 ///////////////////////////////////////////
@@ -318,19 +371,10 @@ char *timer_and_response_message_reply() {
 // [ENG] function that turns the LED on/off
 // [HRV] funkcija paljenja/gašenja LED-ice
 void LED_control_task(void *ledPin){ // parameters can be empty
-    /*int led_state = gpio_get_level(LED_PIN);
-        if (led_state == 0) {
-                gpio_set_level(LED_PIN, 1);
-                //ESP_LOGI(TIME_TAG, "TIME After LED turn on - %lu", (unsigned long) (esp_timer_get_time() / 1000ULL));
-                ESP_LOGI(LED_TAG, "Turn the LED on");
-            
-        }
-        else {
-                gpio_set_level(LED_PIN, 0);
-                ESP_LOGI(LED_TAG, "Turn the LED off");
-        }*/
-    ESP_LOGI(UZORAK_TAG, "------------UZMI UZORAK------------");
+    int led_state = gpio_get_level(LED_PIN);
     last_client_LED_local_time = esp_timer_get_time();
+    ESP_LOGI(UZORAK_TAG, "------------UZMI UZORAK------------");
+    mpu6050_get_data();
     //vTaskDelete(NULL);
 }
 
@@ -580,11 +624,11 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         switch (scan_result->scan_rst.search_evt) {
         case ESP_GAP_SEARCH_INQ_RES_EVT:
             esp_log_buffer_hex(GATTC_TAG, scan_result->scan_rst.bda, 6);
-            ESP_LOGI(GATTC_TAG, "Searched Adv Data Len %d, Scan Response Len %d", scan_result->scan_rst.adv_data_len, scan_result->scan_rst.scan_rsp_len);
+            //ESP_LOGI(GATTC_TAG, "Searched Adv Data Len %d, Scan Response Len %d", scan_result->scan_rst.adv_data_len, scan_result->scan_rst.scan_rsp_len);
             adv_name = esp_ble_resolve_adv_data(scan_result->scan_rst.ble_adv, ESP_BLE_AD_TYPE_NAME_CMPL, &adv_name_len);
-            ESP_LOGI(GATTC_TAG, "Searched Device Name Len %d", adv_name_len);
+            //ESP_LOGI(GATTC_TAG, "Searched Device Name Len %d", adv_name_len);
             esp_log_buffer_char(GATTC_TAG, adv_name, adv_name_len);
-            ESP_LOGI(GATTC_TAG, "\n");
+            //ESP_LOGI(GATTC_TAG, "\n");
             if (adv_name != NULL) {
                 if ( strncmp((char *)adv_name, device_name, adv_name_len) == 0) {
                     memcpy(&(scan_rst), scan_result, sizeof(esp_ble_gap_cb_param_t));
@@ -662,6 +706,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
     case ESP_GATTC_DISCONNECT_EVT:
         ESP_LOGI(GATTC_TAG, "disconnect");
+        mpu6050_deinit();
         free_gattc_srv_db();
         esp_ble_gap_start_scanning(SCAN_ALL_THE_TIME);
         break;
@@ -672,6 +717,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
     case ESP_GATTC_SEARCH_CMPL_EVT:
         ESP_LOGI(GATTC_TAG, "SEARCH_CMPL: conn_id = %x, status %d", spp_conn_id, p_data->search_cmpl.status);
+        mpu6050_init();
         esp_ble_gattc_send_mtu_req(gattc_if, spp_conn_id);
         break;
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {

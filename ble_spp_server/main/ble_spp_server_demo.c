@@ -301,25 +301,20 @@ static void mpu6050_deinit()
 static void mpu6050_get_data()
 {
     if(connectedToClient){
-    uint8_t mpu6050_deviceid;
-    mpu6050_acce_value_t acce;
-    mpu6050_gyro_value_t gyro;
-    int cnt = 10;
-    mpu6050_get_deviceid(mpu6050, &mpu6050_deviceid);
-    printf("mpu6050 device ID is: 0x%02x\n", mpu6050_deviceid);
-    mpu6050_wake_up(mpu6050);
-    mpu6050_set_acce_fs(mpu6050, ACCE_FS_4G);
-    mpu6050_set_gyro_fs(mpu6050, GYRO_FS_500DPS);
-
-    while (cnt--) {
+        uint8_t mpu6050_deviceid;
+        mpu6050_acce_value_t acce;
+        mpu6050_gyro_value_t gyro;
+        mpu6050_get_deviceid(mpu6050, &mpu6050_deviceid);
+        printf("mpu6050 device ID is: 0x%02x\n", mpu6050_deviceid);
+        mpu6050_wake_up(mpu6050);
+        mpu6050_set_acce_fs(mpu6050, ACCE_FS_4G);
+        mpu6050_set_gyro_fs(mpu6050, GYRO_FS_500DPS);
         printf("\n************* MPU6050 MOTION SENSOR ************\n");
         mpu6050_get_acce(mpu6050, &acce);
         printf("acce_x:%.2f, acce_y:%.2f, acce_z:%.2f\n", acce.acce_x, acce.acce_y, acce.acce_z);
         mpu6050_get_gyro(mpu6050, &gyro);
         printf("gyro_x:%.2f, gyro_y:%.2f, gyro_z:%.2f\n", gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
         printf("**************************************************\n");
-        vTaskDelay(1000 / portTICK_RATE_MS);
-    }
     }
 }
 
@@ -389,7 +384,7 @@ void peripheral_setup(){
     out_function_durations.led_control_duration = calculate_led_control_duration();
 
     // turn off LED
-    LED_control_task(LED_PIN); //ovo treba probat ugasit
+    //LED_control_task(LED_PIN); //ovo treba probat ugasit
     server_message_setup();
     keyboard_button_handles_setup();
     
@@ -574,17 +569,6 @@ void LED_control_task(void *ledPin)
 { // parameters can be empty
     int led_state = gpio_get_level(LED_PIN);
     last_server_LED_local_time = esp_timer_get_time();
-    /*if (led_state == 0)
-    {
-        gpio_set_level(LED_PIN, 1);
-        // ESP_LOGI(TIME_TAG, "TIME After LED turn on - %lu", (unsigned long) (esp_timer_get_time() / 1000ULL));
-        ESP_LOGI(LED_TAG, "Turn the LED on");
-    }
-    else
-    {
-        gpio_set_level(LED_PIN, 0);
-        ESP_LOGI(LED_TAG, "Turn the LED off");
-    }*/
     ESP_LOGI(UZORAK_TAG, "------------UZMI UZORAK------------");
     //TODO uzmi uzorak i uzmi od klijenta uzorak
     // vTaskDelete(NULL);
@@ -1242,7 +1226,7 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         connectedToClient = false;
         mpu6050_deinit();
         //kao da sam u stisnio i time se brojac gasi i zavrsava sync
-        LED_control_task((void *)LED_PIN); 
+        //LED_control_task((void *)LED_PIN); 
         esp_ble_gatts_send_indicate(spp_gatts_if, spp_conn_id, spp_handle_table[SPP_IDX_SPP_DATA_NTY_VAL], 12, NULL, false); 
         timer_stop(true);
         ESP_LOGE(TIMER_TAG,"\nSend u - Timer stopped");
