@@ -294,7 +294,7 @@ static void mpu6050_get_data(void *params)
     mpu6050_get_gyro(mpu6050, &gyro);
     printf("gyro_x:%.2f, gyro_y:%.2f, gyro_z:%.2f\n", gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
     printf("**************************************************\n");
-    double tilt = gyro.gyro_z;
+    double tilt = acce.acce_y;
     uint8_t uintValue[2]; //prvi element polja govori dali je pozitivan broj a drugi je vrijednost
     if(tilt <= 0) {
         uintValue[0] = 1;
@@ -618,7 +618,7 @@ void take_samples(void *params) {
 
     for (;;)
     {
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(500));
         mpu6050_get_data(params);
     }
 }
