@@ -66,7 +66,6 @@
 
 static i2c_bus_handle_t i2c_bus = NULL;
 static mpu6050_handle_t mpu6050 = NULL;
-static double sensorValueClient;
 
 static uint8_t adv_config_done       = 0;
 
@@ -101,6 +100,12 @@ static uint8_t raw_scan_rsp_data[] = {
         /* service uuid */
         0x03, 0x03, 0xFF,0x00
 };
+
+// Define your struct
+typedef struct {
+    esp_gatt_if_t gatts_if; 
+    esp_ble_gatts_cb_param_t *param;
+} NotifyParam;
 
 #else
 static uint8_t service_uuid[16] = {
@@ -170,6 +175,9 @@ struct gatts_profile_inst {
 
 static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
 					esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+
+void stop_sampling();
+void start_sampling(void *params);
 
 /* One gatt-based profile one app_id and one gatts_if, this array will store the gatts_if returned by ESP_GATTS_REG_EVT */
 static struct gatts_profile_inst heart_rate_profile_tab[PROFILE_NUM] = {
@@ -269,8 +277,9 @@ static void mpu6050_deinit()
     i2c_bus_delete(&i2c_bus);
 }
 
-static void mpu6050_get_data()
+static void mpu6050_get_data(void *params)
 {
+    NotifyParam *notifyParams = (NotifyParam *)params;
     uint8_t mpu6050_deviceid;
     mpu6050_acce_value_t acce;
     mpu6050_gyro_value_t gyro;
@@ -285,10 +294,21 @@ static void mpu6050_get_data()
     mpu6050_get_gyro(mpu6050, &gyro);
     printf("gyro_x:%.2f, gyro_y:%.2f, gyro_z:%.2f\n", gyro.gyro_x, gyro.gyro_y, gyro.gyro_z);
     printf("**************************************************\n");
-    //TODO
-    //*ski_sensor_value = gyro.gyro_x; //nez koji je
-    // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, heart_rate_handle_table[IDX_CHAR_VAL_A],
-    //                                             sizeof(*ski_sensor_value), *ski_sensor_value, false);
+    double tilt = gyro.gyro_z;
+    uint8_t uintValue[2]; //prvi element polja govori dali je pozitivan broj a drugi je vrijednost
+    if(tilt <= 0) {
+        uintValue[0] = 1;
+    }
+    else {
+        uintValue[0] = 0;
+    }
+    double scaleFactor = 100.0; // Adjust based on the precision you need
+    double midValue = tilt * scaleFactor;
+    uintValue[1] = (uint8_t)(abs(midValue));
+    printf("midValue: %f tilt: %f uintValue: %u, uintValue sign: %u\n", midValue, tilt, uintValue[1], uintValue[0]);
+    
+    esp_ble_gatts_send_indicate(notifyParams->gatts_if, notifyParams->param->write.conn_id, heart_rate_handle_table[IDX_CHAR_VAL_A],
+                                                sizeof(uintValue), uintValue, false);
 }
 
 static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
@@ -412,6 +432,7 @@ void example_exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble
 
 static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
+    NotifyParam *myStruct = (NotifyParam *)malloc(sizeof(NotifyParam));
     switch (event) {
         case ESP_GATTS_REG_EVT:{
             esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(SAMPLE_DEVICE_NAME);
@@ -466,9 +487,15 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                         {
                             notify_data[i] = i % 0xff;
                         }
+                        //NotifyParam *myStruct = (NotifyParam *)malloc(sizeof(NotifyParam));
+                        myStruct->gatts_if = gatts_if;
+                        myStruct->param = param;
+                        
+                        start_sampling(myStruct);
+
                         //the size of notify_data[] need less than MTU size
-                        esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, heart_rate_handle_table[IDX_CHAR_VAL_A],
-                                                sizeof(notify_data), notify_data, false);
+                        /*esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, heart_rate_handle_table[IDX_CHAR_VAL_A],
+                                                sizeof(notify_data), notify_data, false);*/
                     }else if (descr_value == 0x0002){
                         ESP_LOGI(GATTS_TABLE_TAG, "indicate enable");
                         uint8_t indicate_data[15];
@@ -481,6 +508,8 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
                                             sizeof(indicate_data), indicate_data, true);
                     }
                     else if (descr_value == 0x0000){
+                        free(myStruct);
+                        stop_sampling();
                         ESP_LOGI(GATTS_TABLE_TAG, "notify/indicate disable ");
                     }else{
                         ESP_LOGE(GATTS_TABLE_TAG, "unknown descr value");
@@ -590,13 +619,13 @@ void take_samples(void *params) {
     for (;;)
     {
         vTaskDelay(pdMS_TO_TICKS(5000));
-        mpu6050_get_data();
+        mpu6050_get_data(params);
     }
 }
 
-void start_sampling() {
+void start_sampling(void *params) {
     mpu6050_init();
-    xTaskCreate(take_samples, "Take_Samples_Task", 4096, NULL, 0, &takeSamplesTask);
+    xTaskCreate(take_samples, "Take_Samples_Task", 4096, params, 0, &takeSamplesTask);
     ESP_LOGE(SAMPLES_TAG,"---Started sampeling---\n");
 }
 
@@ -667,5 +696,5 @@ void app_main(void)
     if (local_mtu_ret){
         ESP_LOGE(GATTS_TABLE_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
-    start_sampling();
+    
 }
