@@ -1,16 +1,6 @@
-version: '3'
+version: "3"
 services:
   kafka:
-    image: landoop/fast-data-dev:latest
+    image: 'apache/kafka:latest'
     ports:
-      - "9092:9092"
-      - "8081:8081"
-      - "8082:8082"
-      - "8083:8083"
-      - "2181:2181"
-      - "3030:3030"
-      - "9581-9585:9581-9585"
-    environment:
-      ##- ADV_HOST=192.168.99.100
-      - ADV_HOST=127.0.0.1
-      - SAMPLEDATA=0
+      - '9092:9092'
